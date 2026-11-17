@@ -151,8 +151,20 @@ Host the following at an origin equal to an allowlisted entry (for validation, t
 - Source: `first-party-policy.ts:1-8, 10-13`; `dapp-handler.ts:377-382, 434-435, 491-492, 738+, 1985-1988`; `dapp-manager.ts:1279-1283`.
 - Git provenance: file created new in `6b91c8d` — `git log -p -- packages/extension/src/core/dapp/first-party-policy.ts`.
 - DNS (passive): `noirdevelop.refburrow.top` → CNAME `noir-dashboard-develop.pages.dev` (A `172.66.47.89`, `172.66.44.167` — Cloudflare); apex `refburrow.top` → `172.104.172.238` (Linode). No active traffic was sent to the host.
+- **Executed PoC (see `noirwallet-H1-poc.md` + `noirwallet-H1-poc-tier1.mjs`):** (1) running the *real* shipped `first-party-policy.ts` returns `shouldAutoConnectDApp('https://noirdevelop.refburrow.top') === true` and session scope `64` (vs `16`), while a random attacker origin is `false`; (2) a clean `pnpm install && vite build` yields `dist/assets/runtime-message-security-*.js` containing `Set(["https://app.zknoir.com","https://noirdevelop.refburrow.top"])` — proving it ships in the production bundle (`Noir Wallet` v2.0.0), not dev-stripped.
+- **Not reproduced live in the sandbox (honest):** the zero-click address-exfiltration demo additionally needs (a) beta activation via a server-validated invite code (`betaInviteActivation.isActivated()` gates all dApp requests; `infrastructure/wallet/beta-invite-api.ts`) and (b) a created/unlocked wallet — neither available here. This is an environmental blocker, not evidence the bug is absent. It is also a real-world mitigant: current exploitation is limited to beta-activated installs (which is the intended user flow for this promoted beta). Manual full-repro steps are in `noirwallet-H1-poc.md`.
 
 ---
+
+## E-bis. Round-2 deep Critical hunt (outcome)
+
+A second pass ran four adversarial agents dedicated to the Critical tier (unauthorized transfer / key exposure), each briefed with round-1's verified facts to go deeper:
+- **Zcash send/PCZT fund-redirection** — no Critical. `to`/`amount`/`memo`/fee/account are bound by object identity (software path) or exhaustive field-equality + consume-on-use + JSON binding (hardware path), re-asserted immediately before broadcast; PCZT combine uses the background's own stored full PCZT; sighash binding backstops everything.
+- **EVM / blind-sign drains** — no Critical. The raw signed tx is decoded and re-verified byte-for-byte against the reviewed intent; typed-data renders the full AST and decodes Permit/Permit2 (not `primaryType`-only). *Residual lead:* typed-data AST↔digest faithfulness depends on the Rust summarizer (not fully covered). *Low defect:* mislabeled "USDC" token hint (`evm-dapp-handler.ts:1028-1033`) — not UI-consumed, not exploitable.
+- **Authorization TOCTOU / cross-origin / session integrity** — no Critical. Uniform capture→approve→recheck(active+authorization+revision); origin derivation unforgeable; the CAIP-25 fail-open is not on the `wallet_invokeMethod` path and the one legacy use is backstopped by per-chain `requireAuthorizedAccount`; first-party status never relaxes per-transaction approval.
+- **Key/seed exfiltration** — no Critical. No `externally_connectable`; secret handlers double-gated to the `extension-page` context; every WASM signing export takes a caller-supplied key and never serializes the USK/seed to JS.
+
+**Net:** no new Critical. H-1 remains the strongest eligible finding; its PoC status is recorded in section E and `noirwallet-H1-poc.md`.
 
 ## F. Research conclusion
 
