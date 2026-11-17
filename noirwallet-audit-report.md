@@ -166,6 +166,21 @@ A second pass ran four adversarial agents dedicated to the Critical tier (unauth
 
 **Net:** no new Critical. H-1 remains the strongest eligible finding; its PoC status is recorded in section E and `noirwallet-H1-poc.md`.
 
+## E-ter. Round-3 deep Critical hunt (new surfaces, outcome)
+
+Four more agents targeted surfaces untouched by rounds 1–2:
+- **WASM package integrity & loading** (explicitly in-scope) — **no Critical.** Both wasm engines are bundled/immutable and gated at runtime by a `crypto.subtle.digest('SHA-256')` check against a pinned manifest *before* `WebAssembly.instantiate`; no remote/CDN wasm fetch, no attacker-substitutable path. Defense-in-depth note: the expected hash is anchored to a co-located `wasm-integrity.json` rather than a compiled constant (only matters to a supply-chain/commit attacker — out of scope).
+- **Multichain vault crypto (Argon2id/XChaCha nonce/AEAD/KDF)** — **no Critical.** Fresh random IVs per op, no decrypt-then-use, KDF params hard-pinned in `parseRawEncryptedVault`, non-extractable session key, write-side AAD mirrors read-side. Sound at the JS boundary.
+- **Cross-chain swap / Intents / Confidential deposit-address binding** — **no Critical.** Deposit address + amounts are bound to the reviewed quote and re-checked at send; no post-approval substitution, no exact-output bypass. Low notes: adapter's structural-only deposit check (unused by the extension); a non-exact settlement-amount reporting asymmetry.
+- **EIP-712 typed-data summarizer (blind-sign)** — **no Critical.** The displayed AST is independently reconstructed in TypeScript from the *same* signed JSON using the same type rules, so a malicious dApp cannot make a benign display sign a malicious digest. Two genuine lower-severity leads below.
+
+### New leads from round 3 (lower severity; not Critical)
+- **M-3 (Low/Med):** Software EVM typed-data path does not assert `hashTypedData(parsedTypedData) === signingHash`. The Ledger path (`evm-dapp-handler.ts:1486-1491`) and the Permit2-batch case (`evm-permit-review.ts:281`) both cross-verify the digest, but the generic software path (`signing-adapter.ts:807-835`, `adaptEvmTypedData`) trusts the engine's `signingHash` verbatim with no `ecrecover`/`verifyTypedData` tripwire. Not dApp-exploitable with an honest engine (display is faithful to the signed JSON); it is a defense-in-depth gap that would catch a future summarizer/engine hashing divergence. **Fix:** compute `hashTypedData({domain, types, primaryType, message})` and assert equality with `signingHash`, mirroring the Ledger path (~one line, viem already imported).
+- **M-4 (Low/Med, disclosure prominence):** For a non-permit typed-data signature (`SigningSummaryReview.tsx` `DAppMessageReview`), the domain (including `verifyingContract`), primary type, and digest are collapsed under "Advanced"; only `Message.*` rows are prominent. All data is visible on expand, so this is prominence, not inaccuracy — but `verifyingContract` is the key "what does this authorize" field and should be prominent.
+
+### The only place a Critical could still plausibly hide
+The EVM/multichain keyring **WASM Rust source is not present in the in-scope clones** (only `zcash-wallet-wasm` and the `zcash_voting` crate are). Its EIP-712 hasher and Argon2id/XChaCha internals are opaque (`wallet_wasm.d.ts` only). A lossy/buggy EIP-712 summarizer **there** — combined with the missing M-3 software-path assertion — is the one residual path to a real blind-sign Critical, but it cannot be confirmed or refuted from the available source, and may be out of scope.
+
 ## F. Research conclusion
 
 - **Thoroughly investigated:** content-script/background trust boundary and origin derivation; the full dApp authorization + connection model (Zcash + default-enabled EVM); transaction signing/approval WYSIWYS (Zcash send, EVM send/sign, payload-fingerprint binding); approval/HW-sign response listeners; CAIP-25 multichain scope parsing; keyring/seed-at-rest crypto, unlock/session gating, credential envelopes; the Rust/WASM core (key boundary, PCZT prove/combine/extract, Ledger PCZT, one-click & delegation signers, fee/amount handling, compact-block CDN validation); the WalletConnect adapter and SDK/in-page provider.
